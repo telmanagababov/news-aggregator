@@ -55,6 +55,8 @@ APP.Main = (function() {
   var storyDetailsCommentTemplate =
       Handlebars.compile(tmplStoryDetailsComment);
 
+  var story = null;
+
   /**
    * As every single story arrives in shove its
    * content in at that exact moment. Feels like something
@@ -62,39 +64,36 @@ APP.Main = (function() {
    * probably in a requestAnimationFrame callback.
    */
   function onStoryData (key, details) {
-
-    // This seems odd. Surely we could just select the story
-    // directly rather than looping through all of them.
-    var storyElements = document.querySelectorAll('.story');
-
-    for (var i = 0; i < storyElements.length; i++) {
-
-      if (storyElements[i].getAttribute('id') === 's-' + key) {
-
-        details.time *= 1000;
-        var story = storyElements[i];
-        var html = storyTemplate(details);
-        story.innerHTML = html;
-        story.addEventListener('click', onStoryClick.bind(this, details));
-        story.classList.add('clickable');
-
-        // Tick down. When zero we can batch in the next load.
-        storyLoadCount--;
-
-      }
-    }
-
-    // Colorize on complete.
-    if (storyLoadCount === 0)
-      colorizeAndScaleStories();
+    requestAnimationFrame(function(){
+      updateStory(key, details);
+    });
   }
+
+  function updateStory(key, details) {
+    var story = document.querySelector('#s-' + key);
+    details.time *= 1000;
+    story.innerHTML = storyTemplate(details);
+    story.classList.add('clickable');
+    story.addEventListener('click', onStoryClick.bind(this, details));
+  }
+
+  var storyDetails = null,
+      storyDetailsComponent = null,
+      comment = null,
+      commentsElement = null,
+      storyHeader = null,
+      storyContent = null,
+      storyDetailsHtml = null,
+      kids = null,
+      commentHtml = storyDetailsCommentTemplate({
+        by: '', text: 'Loading comment...'
+      }),
+      closeButton = null,
+      headerHeight = null;
 
   function onStoryClick(details) {
 
-    var storyDetails = $('sd-' + details.id);
-
-    // Wait a little time then show the story details.
-    setTimeout(showStory.bind(this, details.id), 60);
+    storyDetails = $('sd-' + details.id);
 
     // Create and append the story. A visual change...
     // perhaps that should be in a requestAnimationFrame?
@@ -106,182 +105,191 @@ APP.Main = (function() {
       if (details.url)
         details.urlobj = new URL(details.url);
 
-      var comment;
-      var commentsElement;
-      var storyHeader;
-      var storyContent;
-
-      var storyDetailsHtml = storyDetailsTemplate(details);
-      var kids = details.kids;
-      var commentHtml = storyDetailsCommentTemplate({
-        by: '', text: 'Loading comment...'
+      requestAnimationFrame(function(){
+        createStoryDetails(details);
       });
-
-      storyDetails = document.createElement('section');
-      storyDetails.setAttribute('id', 'sd-' + details.id);
-      storyDetails.classList.add('story-details');
-      storyDetails.innerHTML = storyDetailsHtml;
-
-      document.body.appendChild(storyDetails);
-
-      commentsElement = storyDetails.querySelector('.js-comments');
-      storyHeader = storyDetails.querySelector('.js-header');
-      storyContent = storyDetails.querySelector('.js-content');
-
-      var closeButton = storyDetails.querySelector('.js-close');
-      closeButton.addEventListener('click', hideStory.bind(this, details.id));
-
-      var headerHeight = storyHeader.getBoundingClientRect().height;
-      storyContent.style.paddingTop = headerHeight + 'px';
-
-      if (typeof kids === 'undefined')
-        return;
-
-      for (var k = 0; k < kids.length; k++) {
-
-        comment = document.createElement('aside');
-        comment.setAttribute('id', 'sdc-' + kids[k]);
-        comment.classList.add('story-details__comment');
-        comment.innerHTML = commentHtml;
-        commentsElement.appendChild(comment);
-
-        // Update the comment with the live data.
-        APP.Data.getStoryComment(kids[k], function(commentDetails) {
-
-          commentDetails.time *= 1000;
-
-          var comment = commentsElement.querySelector(
-              '#sdc-' + commentDetails.id);
-          comment.innerHTML = storyDetailsCommentTemplate(
-              commentDetails,
-              localeData);
-        });
-      }
     }
-
+    // Wait a little time then show the story details.
+    requestAnimationFrame(function(){
+      showStory.call(this);
+    });
   }
 
-  function showStory(id) {
+  function createStoryDetails(details) {
+    if(storyDetailsComponent === null) {
+      storyDetailsComponent = document.createElement('section');
+      storyDetailsComponent.classList.add('story-details');
+      document.body.appendChild(storyDetailsComponent);
+      storyDetailsHtml = storyDetailsTemplate(details);
+      storyDetailsComponent.innerHTML = storyDetailsHtml;
+      commentsElement = storyDetailsComponent.querySelector('.js-comments');
+      storyHeader = storyDetailsComponent.querySelector('.js-header');
+      storyContent = storyDetailsComponent.querySelector('.js-content');
+      closeButton = storyDetailsComponent.querySelector('.js-close');
+      closeButton.addEventListener('click', hideStory.bind(this));
+      headerHeight = storyHeader.getBoundingClientRect().height;
+      storyContent.style.paddingTop = headerHeight + 'px';
+    }
+
+    kids = details.kids;
+    storyDetails = storyDetailsComponent;
+    storyDetails.setAttribute('id', 'sd-' + details.id);
+
+    if (typeof kids === 'undefined')
+      return;
+
+    for (var k = 0; k < kids.length; k++) {
+      (function(id) {
+        requestAnimationFrame(function () {addComment(id);});
+      })(kids[k]);
+    }
+  }
+
+  function addComment(id) {
+    console.log("addComment: ", id);
+    comment = document.createElement('aside');
+    comment.setAttribute('id', 'sdc-' + id);
+    comment.classList.add('story-details__comment');
+    comment.innerHTML = commentHtml;
+    commentsElement.appendChild(comment);
+    // Update the comment with the live data.
+    APP.Data.getStoryComment(id, function(commentDetails) {
+      commentDetails.time *= 1000;
+      comment = commentsElement.querySelector('#sdc-' + commentDetails.id);
+      comment.innerHTML = storyDetailsCommentTemplate(commentDetails, localeData);
+    });
+  }
+
+  var left = null,
+      storyDetailsPosition = null;
+
+  function showStory() {
 
     if (inDetails)
       return;
 
     inDetails = true;
 
-    var storyDetails = $('#sd-' + id);
-    var left = null;
-
-    if (!storyDetails)
-      return;
-
-    document.body.classList.add('details-active');
     storyDetails.style.opacity = 1;
-
-    function animate () {
-
-      // Find out where it currently is.
-      var storyDetailsPosition = storyDetails.getBoundingClientRect();
-
-      // Set the left value if we don't have one already.
-      if (left === null)
-        left = storyDetailsPosition.left;
-
-      // Now figure out where it needs to go.
-      left += (0 - storyDetailsPosition.left) * 0.1;
-
-      // Set up the next bit of the animation if there is more to do.
-      if (Math.abs(left) > 0.5)
-        setTimeout(animate, 4);
-      else
-        left = 0;
-
-      // And update the styles. Wait, is this a read-write cycle?
-      // I hope I don't trigger a forced synchronous layout!
-      storyDetails.style.left = left + 'px';
-    }
 
     // We want slick, right, so let's do a setTimeout
     // every few milliseconds. That's going to keep
     // it all tight. Or maybe we're doing visual changes
     // and they should be in a requestAnimationFrame
-    setTimeout(animate, 4);
+    storyDetailsPosition = storyDetails.getBoundingClientRect();
+    requestAnimationFrame(animateShow);
   }
 
-  function hideStory(id) {
+  function animateShow () {
+
+    // Set the left value if we don't have one already.
+    if (left === null)
+      left = storyDetailsPosition.left;
+
+    // Now figure out where it needs to go.
+    left += (0 - storyDetailsPosition.left) * 0.1;
+    storyDetailsPosition.left = left;
+
+    // Set up the next bit of the animation if there is more to do.
+    if (Math.abs(left) > 0.5)
+      requestAnimationFrame(animateShow);
+    else
+      left = 0;
+
+    // And update the styles. Wait, is this a read-write cycle?
+    // I hope I don't trigger a forced synchronous layout!
+    storyDetails.style.left = left + 'px';
+  }
+
+  var mainPosition = null,
+      target = null;
+    
+  function hideStory() {
 
     if (!inDetails)
       return;
 
-    var storyDetails = $('#sd-' + id);
-    var left = 0;
-
-    document.body.classList.remove('details-active');
     storyDetails.style.opacity = 0;
-
-    function animate () {
-
-      // Find out where it currently is.
-      var mainPosition = main.getBoundingClientRect();
-      var storyDetailsPosition = storyDetails.getBoundingClientRect();
-      var target = mainPosition.width + 100;
-
-      // Now figure out where it needs to go.
-      left += (target - storyDetailsPosition.left) * 0.1;
-
-      // Set up the next bit of the animation if there is more to do.
-      if (Math.abs(left - target) > 0.5) {
-        setTimeout(animate, 4);
-      } else {
-        left = target;
-        inDetails = false;
-      }
-
-      // And update the styles. Wait, is this a read-write cycle?
-      // I hope I don't trigger a forced synchronous layout!
-      storyDetails.style.left = left + 'px';
-    }
 
     // We want slick, right, so let's do a setTimeout
     // every few milliseconds. That's going to keep
     // it all tight. Or maybe we're doing visual changes
     // and they should be in a requestAnimationFrame
-    setTimeout(animate, 4);
+    storyDetailsPosition = storyDetails.getBoundingClientRect();
+    requestAnimationFrame(animateHide);
   }
+
+  function animateHide () {
+
+    // Find out where it currently is.
+    mainPosition = main.getBoundingClientRect();
+    target = mainPosition.width + 100;
+
+    // Now figure out where it needs to go.
+    left += (target - storyDetailsPosition.left) * 0.1;
+    storyDetailsPosition.left = left;
+
+    // Set up the next bit of the animation if there is more to do.
+    if (Math.abs(left - target) > 0.5) {
+      requestAnimationFrame(animateHide);
+    } else {
+      left = target;
+      inDetails = false;
+    }
+
+    // And update the styles. Wait, is this a read-write cycle?
+    // I hope I don't trigger a forced synchronous layout!
+    storyDetails.style.left = left + 'px';
+  }
+
+  var renderedStoryElements = 0,
+      storyElements = null,
+      storyElementsLength = null,
+      score = null,
+      title = null,
+      height = null,
+      scoreLocation = null,
+      scale = null,
+      opacity = null,
+      bodyClientRect = null,
+      saturation = null,
+      i = null;
 
   /**
    * Does this really add anything? Can we do this kind
    * of work in a cheaper way?
    */
   function colorizeAndScaleStories() {
-
-    var storyElements = document.querySelectorAll('.story');
-
     // It does seem awfully broad to change all the
     // colors every time!
-    for (var s = 0; s < storyElements.length; s++) {
+    storyElements = document.querySelectorAll('.story');
+    storyElementsLength = storyElements.length;
+    if(renderedStoryElements < storyElementsLength) {
 
-      var story = storyElements[s];
-      var score = story.querySelector('.story__score');
-      var title = story.querySelector('.story__title');
+      bodyClientRect = document.body.getBoundingClientRect().top;
 
-      // Base the scale on the y position of the score.
-      var height = main.offsetHeight;
-      var mainPosition = main.getBoundingClientRect();
-      var scoreLocation = score.getBoundingClientRect().top -
-          document.body.getBoundingClientRect().top;
-      var scale = Math.min(1, 1 - (0.05 * ((scoreLocation - 170) / height)));
-      var opacity = Math.min(1, 1 - (0.5 * ((scoreLocation - 170) / height)));
+      for (i = renderedStoryElements; i < storyElementsLength; i++) {
+        story = storyElements[i];
+        score = story.querySelector('.story__score');
+        title = story.querySelector('.story__title');
+        // Base the scale on the y position of the score.
+        height = main.offsetHeight;
+        scoreLocation = score.getBoundingClientRect().top - bodyClientRect;
+        scale = Math.min(1, 1 - (0.05 * ((scoreLocation - 170) / height)));
+        opacity = Math.min(1, 1 - (0.5 * ((scoreLocation - 170) / height)));
 
-      score.style.width = (scale * 40) + 'px';
-      score.style.height = (scale * 40) + 'px';
-      score.style.lineHeight = (scale * 40) + 'px';
+        score.style.width = (scale * 40) + 'px';
+        score.style.height = (scale * 40) + 'px';
+        score.style.lineHeight = (scale * 40) + 'px';
 
-      // Now figure out how wide it is and use that to saturate it.
-      scoreLocation = score.getBoundingClientRect();
-      var saturation = (100 * ((scoreLocation.width - 38) / 2));
+        // Now figure out how wide it is and use that to saturate it.
+        scoreLocation = score.getBoundingClientRect();
+        saturation = (100 * ((scoreLocation.width - 38) / 2));
 
-      score.style.backgroundColor = 'hsl(42, ' + saturation + '%, 50%)';
-      title.style.opacity = opacity;
+        score.style.backgroundColor = 'hsl(42, ' + saturation + '%, 50%)';
+        title.style.opacity = opacity;
+      }
+      renderedStoryElements = storyElementsLength;
     }
   }
 
@@ -295,34 +303,39 @@ APP.Main = (function() {
 
   });
 
+  var header = $('header'),
+      headerTitles = header.querySelector('.header__title-wrapper'),
+      scrollTop = null,
+      scrollTopCapped = null,
+      scaleString = null,
+      loadThreshold = null;
+
   main.addEventListener('scroll', function() {
+    scrollTop = main.scrollTop;
+    scrollTopCapped = Math.min(70, scrollTop);
+    scaleString = 'scale(' + (1 - (scrollTopCapped / 300)) + ')';
 
-    var header = $('header');
-    var headerTitles = header.querySelector('.header__title-wrapper');
-    var scrollTopCapped = Math.min(70, main.scrollTop);
-    var scaleString = 'scale(' + (1 - (scrollTopCapped / 300)) + ')';
-
-    colorizeAndScaleStories();
-
-    header.style.height = (156 - scrollTopCapped) + 'px';
-    headerTitles.style.webkitTransform = scaleString;
-    headerTitles.style.transform = scaleString;
+    if(scrollTopCapped !== 70 || headerHeight !== "86px") {
+      headerHeight = (156 - scrollTopCapped) + 'px';
+      header.style.height = headerHeight;
+      headerTitles.style.webkitTransform = scaleString;
+      headerTitles.style.transform = scaleString;
+    }
 
     // Add a shadow to the header.
-    if (main.scrollTop > 70)
+    if (scrollTop > 70)
       document.body.classList.add('raised');
     else
       document.body.classList.remove('raised');
 
     // Check if we need to load the next batch of stories.
-    var loadThreshold = (main.scrollHeight - main.offsetHeight -
-        LAZY_LOAD_THRESHOLD);
-    if (main.scrollTop > loadThreshold)
+    loadThreshold = (main.scrollHeight - main.offsetHeight - LAZY_LOAD_THRESHOLD);
+    if (scrollTop > loadThreshold)
       loadStoryBatch();
+      colorizeAndScaleStories();
   });
 
   function loadStoryBatch() {
-
     if (storyLoadCount > 0)
       return;
 
@@ -349,8 +362,9 @@ APP.Main = (function() {
       APP.Data.getStoryById(stories[i], onStoryData.bind(this, key));
     }
 
+    storyLoadCount = 0;
     storyStart += count;
-
+    colorizeAndScaleStories();
   }
 
   // Bootstrap in the stories.
